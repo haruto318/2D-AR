@@ -26,6 +26,7 @@ class ViewController: UIViewController, UIScrollViewDelegate, UIPickerViewDelega
     var goal: Character = "H"
     
     private var resetButton: UIButton!
+    private var stopButton: UIButton!
 
     private let configuration = ARWorldTrackingConfiguration()
     var locationService: LocationService = LocationService()
@@ -54,8 +55,10 @@ class ViewController: UIViewController, UIScrollViewDelegate, UIPickerViewDelega
     
     var isInitialDisplay: Bool = true
     
-    
     var locations: [CLLocation] = []
+    
+    var orientationTimer: Timer?
+    var orientationRecords: [OrientationRecord] = []
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -85,6 +88,7 @@ class ViewController: UIViewController, UIScrollViewDelegate, UIPickerViewDelega
         setupTextDetection()
         
         setupResetButton()
+        setupStopButton()
         
         // Add annotation
         addAnnotation(at: CGPoint(x: 131, y: 846), title: "location")
@@ -110,6 +114,25 @@ class ViewController: UIViewController, UIScrollViewDelegate, UIPickerViewDelega
         scrollView.contentSize = mapImageView.bounds.size
     }
     
+    private func setupStopButton() {
+        stopButton = UIButton(type: .system)
+        stopButton.setTitle("Stop", for: .normal)
+        stopButton.setTitleColor(.white, for: .normal)
+        stopButton.backgroundColor = UIColor.red.withAlphaComponent(0.5)
+        stopButton.layer.cornerRadius = 10
+        stopButton.addTarget(self, action: #selector(stopOrientationButtonTapped), for: .touchUpInside)
+        
+        self.view.addSubview(stopButton)
+        
+        stopButton.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stopButton.widthAnchor.constraint(equalToConstant: 80),
+            stopButton.heightAnchor.constraint(equalToConstant: 40),
+            stopButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
+            stopButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20)
+        ])
+    }
+    
     private func setupResetButton() {
         resetButton = UIButton(type: .system)
         resetButton.setTitle("Reset", for: .normal)
@@ -133,6 +156,11 @@ class ViewController: UIViewController, UIScrollViewDelegate, UIPickerViewDelega
         arrowNodes.removeAll()
         mapView.path.removeAll()
         restartSession()
+    }
+    
+    @objc private func stopOrientationButtonTapped() {
+        stopOrientationRecording()
+        createFile()
     }
 
     func setupScrollView() {
@@ -640,6 +668,7 @@ extension ViewController {
             if self.isInitialDisplay {
                 self.kakuninButton.isHidden = false /// ボタン表示
                 self.isInitialDisplay = false
+                self.startOrientationRecording()
             } else {
 //                self.sphereNodes.removeAll()
 //                self.mapView.path.removeAll()
@@ -901,5 +930,82 @@ extension SCNQuaternion {
         self.y = y
         self.z = z
         self.w = w
+    }
+}
+
+
+/// Get and Record Orientation
+extension ViewController {
+    func createFile() {
+        let fileManager = FileManager.default
+        do {
+            let currentTime = Date()
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+            let currentTimeString = dateFormatter.string(from: currentTime)
+            
+            let documentsURL = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
+            let fileURL = documentsURL.appendingPathComponent("2D+AR_orientationRecords_\(currentTimeString).csv")
+                    
+            // CSVファイルのヘッダー
+            var csvText = "timestamp,orientation\n"
+                    
+            // orientationRecords配列をCSV形式に変換
+            dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+            for record in orientationRecords {
+                let dateString = dateFormatter.string(from: record.timestamp)
+                csvText += "\(dateString),\(record.orientation)\n"
+            }
+                    
+            // データをファイルに書き込み
+            try csvText.write(to: fileURL, atomically: true, encoding: .utf8)
+                print("CSV file created successfully at \(fileURL.path)")
+            } catch {
+                print("Error creating CSV file: \(error.localizedDescription)")
+            }
+    }
+    
+    @objc func checkOrientation() {
+        let orientation = UIDevice.current.orientation
+        let orientationValue = getOrientationValue(orientation)
+        let currentTime = Date()
+        let record = OrientationRecord(timestamp: currentTime, orientation: orientationValue)
+        orientationRecords.append(record)
+        print("Recorded Orientation at \(currentTime): \(orientationValue)")
+    }
+    
+    func getOrientationValue(_ orientation: UIDeviceOrientation) -> Int {
+        switch orientation {
+        case .unknown:
+            return 0
+        case .portrait:
+            return 1
+        case .portraitUpsideDown:
+            return 2
+        case .landscapeLeft:
+            return 3
+        case .landscapeRight:
+            return 4
+        case .faceUp:
+            return 5
+        case .faceDown:
+            return 6
+        @unknown default:
+            return -1
+        }
+    }
+    
+    func startOrientationRecording() {
+        // 既にタイマーが動作している場合は無視する
+        guard orientationTimer == nil else { return }
+        
+        orientationTimer = Timer.scheduledTimer(timeInterval: 2.0, target: self, selector: #selector(checkOrientation), userInfo: nil, repeats: true)
+        print("Orientation recording started.")
+    }
+    
+    func stopOrientationRecording() {
+        orientationTimer?.invalidate()
+        orientationTimer = nil
+        print("Orientation recording stopped.")
     }
 }
